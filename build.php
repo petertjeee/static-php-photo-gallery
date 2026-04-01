@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const VERSION = '1.0';
+
 if (PHP_SAPI !== 'cli') {
     if (!headers_sent()) {
         header('HTTP/1.1 404 Not Found');
@@ -46,6 +48,7 @@ final class GalleryBuilder
             $this->fail("Failed to create output directory: {$this->outDir}");
         }
 
+        $this->log('Static Photo Gallery Generator v' . VERSION);
         $this->log('Gallery build starting');
         $this->log('Albums: ' . $this->albumsDir);
         $this->log('Output: ' . $this->outDir);

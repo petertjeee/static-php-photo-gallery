@@ -1,5 +1,7 @@
 # Static Photo Gallery Generator
 
+**Version 1.0**
+
 This repo contains a simple PHP CLI tool that generates a static photo gallery from the `albums/` directory.
 
 - Album overview page: `index.html`
