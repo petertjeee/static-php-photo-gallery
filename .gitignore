@@ -1,0 +1,7 @@
+.DS_Store
+
+# Do not commit photo content
+albums/
+
+# Default output folder (if you use it)
+site/
