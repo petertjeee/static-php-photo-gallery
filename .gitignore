@@ -1,7 +1,8 @@
 .DS_Store
 
-# Do not commit photo content
-albums/
+# Track albums/ directory itself but not its contents
+albums/*
+!albums/place-your-albums-here.txt
 
 # Default output folder (if you use it)
 site/
