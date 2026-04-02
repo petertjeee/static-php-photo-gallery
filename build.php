@@ -442,7 +442,7 @@ final class GalleryBuilder
         $content = ''
             . '<div class="topbar">'
             . '<a class="back" href="../">' . $backLabel . '</a>'
-            . '<div class="brand">' . $this->escapeHtml($node['title']) . '</div>'
+            . $this->buildBreadcrumb($node, $depth, $prefix)
             . '</div>'
             . '<div class="container">'
             . $subdirSection;
@@ -516,7 +516,7 @@ final class GalleryBuilder
         $content = ''
             . '<div class="topbar viewerbar">'
             . '<a class="back" href="./">← Thumbnails</a>'
-            . '<div class="brand">' . $this->escapeHtml($node['title']) . '</div>'
+            . $this->buildBreadcrumb($node, $depth, $prefix)
             . '<div class="viewer-actions">'
             . '<a id="dl" class="btn" href="#" download>Download</a>'
             . '<button id="exifBtn" class="btn" type="button">EXIF</button>'
@@ -659,6 +659,25 @@ final class GalleryBuilder
         }
     }
 
+    private function buildBreadcrumb(array $node, int $depth, string $prefix): string
+    {
+        $parts = explode('/', $node['albumsRelPath']);
+        $crumbs = [];
+
+        $crumbs[] = '<a class="crumb" href="' . $this->escapeAttr($prefix) . '">Gallery</a>';
+
+        for ($i = 0; $i < count($parts) - 1; $i++) {
+            $link = str_repeat('../', $depth - $i - 1);
+            $crumbs[] = '<a class="crumb" href="' . $this->escapeAttr($link) . '">' . $this->escapeHtml($this->humanize($parts[$i])) . '</a>';
+        }
+
+        $crumbs[] = '<span class="crumb crumb-current">' . $this->escapeHtml($node['title']) . '</span>';
+
+        return '<nav class="breadcrumb">'
+            . implode('<span class="crumb-sep">›</span>', $crumbs)
+            . '</nav>';
+    }
+
     private function albumsRelPathToUrl(string $relPath): string
     {
         return implode('/', array_map('rawurlencode', explode('/', $relPath)));
@@ -730,6 +749,7 @@ a{color:inherit;text-decoration:none}
 .photo img{width:100%;height:160px;object-fit:cover;display:block}
 .loader{padding:22px 0;text-align:center;color:var(--muted)}
 .section-label{margin:20px 0 8px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.breadcrumb{display:flex;align-items:center;gap:4px;flex-wrap:wrap;flex:1;min-width:0}.crumb{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crumb:hover{color:var(--text)}.crumb-sep{color:var(--muted);font-size:12px;opacity:.5;flex-shrink:0}.crumb-current{font-weight:700;color:var(--text)}
 .site-footer{padding:24px 16px;text-align:center;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}.site-footer a{color:var(--muted);text-decoration:underline;text-underline-offset:3px}
 .viewerbar{justify-content:space-between}
 .viewer-actions{display:flex;gap:10px;align-items:center}
