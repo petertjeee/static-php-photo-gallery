@@ -516,7 +516,10 @@ final class GalleryBuilder
         $content = ''
             . '<div class="topbar viewerbar">'
             . '<a class="back" href="./">← Thumbnails</a>'
+            . '<div class="viewer-center">'
             . $this->buildBreadcrumb($node, $depth, $prefix)
+            . '<div id="viewer-filename" class="viewer-filename"></div>'
+            . '</div>'
             . '<div class="viewer-actions">'
             . '<a id="dl" class="btn" href="#" download>Download</a>'
             . '<button id="exifBtn" class="btn" type="button">EXIF</button>'
@@ -551,6 +554,7 @@ final class GalleryBuilder
             . 'main.src=it.src;'
             . 'dl.href=it.src;'
             . 'document.title=data.title+" — "+it.name;'
+            . 'const fn=document.getElementById("viewer-filename");if(fn) fn.textContent=it.name;'
             . 'Array.from(film.children).forEach((el)=>{el.classList.toggle("active", parseInt(el.dataset.idx,10)===idx);});'
             . 'const active=film.querySelector(".thumb.active");'
             . 'if(active){active.scrollIntoView({block:"nearest",inline:"center"});}'
@@ -749,6 +753,8 @@ a{color:inherit;text-decoration:none}
 .photo img{width:100%;height:160px;object-fit:cover;display:block}
 .loader{padding:22px 0;text-align:center;color:var(--muted)}
 .section-label{margin:20px 0 8px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.viewer-center{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.viewer-filename{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
 .breadcrumb{display:flex;align-items:center;gap:4px;flex-wrap:wrap;flex:1;min-width:0}.crumb{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crumb:hover{color:var(--text)}.crumb-sep{color:var(--muted);font-size:12px;opacity:.5;flex-shrink:0}.crumb-current{font-weight:700;color:var(--text)}
 .site-footer{padding:24px 16px;text-align:center;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}.site-footer a{color:var(--muted);text-decoration:underline;text-underline-offset:3px}
 .viewerbar{justify-content:space-between}
