@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 
 if (PHP_SAPI !== 'cli') {
     if (!headers_sent()) {
@@ -71,6 +71,7 @@ final class GalleryBuilder
         foreach ($albums as $album) {
             $this->writeNodePages($album);
         }
+        $this->writeCounterPhp();
 
         $this->log('Thumbnails created: ' . $this->thumbsCreated);
         $this->log('Thumbnails skipped: ' . $this->thumbsSkipped);
@@ -504,6 +505,7 @@ final class GalleryBuilder
             [
                 'id' => $node['id'],
                 'title' => $node['title'],
+                'root' => $prefix,
                 'items' => $items,
             ],
             JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
@@ -517,6 +519,7 @@ final class GalleryBuilder
             . '<div class="topbar viewerbar">'
             . '<a class="back" href="./">← Thumbnails</a>'
             . $this->buildBreadcrumb($node, $depth, $prefix, true)
+            . '<span id="view-count" class="view-count"></span>'
             . '<div class="viewer-actions">'
             . '<a id="dl" class="btn" href="#" download>Download</a>'
             . '<button id="exifBtn" class="btn" type="button">EXIF</button>'
@@ -545,6 +548,7 @@ final class GalleryBuilder
             . 'let idx=parseInt(qs.get("i")||"0",10);'
             . 'if(Number.isNaN(idx)||idx<0) idx=0;'
             . 'if(idx>=data.items.length) idx=Math.max(0,data.items.length-1);'
+            . 'let viewTimer=null;'
             . 'function setIdx(i, push){'
             . 'idx=Math.max(0,Math.min(data.items.length-1,i));'
             . 'const it=data.items[idx];'
@@ -552,6 +556,13 @@ final class GalleryBuilder
             . 'dl.href=it.src;'
             . 'document.title=data.title+" — "+it.name;'
             . 'const fn=document.getElementById("crumb-file");if(fn) fn.textContent=it.name;'
+            . 'clearTimeout(viewTimer);'
+            . 'viewTimer=setTimeout(function(){'
+            . 'fetch(data.root+"counter.php",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({img:it.src})})'
+            . '.then(function(r){return r.json();})'
+            . '.then(function(d){var vc=document.getElementById("view-count");if(vc)vc.textContent=d.count+(d.count===1?" view":" views");})'
+            . '.catch(function(){});'
+            . '},1500);'
             . 'Array.from(film.children).forEach((el)=>{el.classList.toggle("active", parseInt(el.dataset.idx,10)===idx);});'
             . 'const active=film.querySelector(".thumb.active");'
             . 'if(active){active.scrollIntoView({block:"nearest",inline:"center"});}'
@@ -686,6 +697,67 @@ final class GalleryBuilder
             . '</nav>';
     }
 
+    private function writeCounterPhp(): void
+    {
+        $content = <<<'COUNTER'
+<?php
+declare(strict_types=1);
+
+define('DB_PATH', __DIR__ . '/../__DB_FILENAME__');
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Method not allowed']);
+    exit;
+}
+
+$raw = (string)file_get_contents('php://input');
+$body = json_decode($raw, true);
+$img = isset($body['img']) ? trim((string)$body['img']) : '';
+
+if ($img === '') {
+    http_response_code(400);
+    echo json_encode(['error' => 'Missing img']);
+    exit;
+}
+
+if (!preg_match('#^[a-zA-Z0-9_./%+\- ]+$#u', $img)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid path']);
+    exit;
+}
+
+try {
+    $db = new SQLite3(DB_PATH);
+    $db->busyTimeout(2000);
+    $db->exec('CREATE TABLE IF NOT EXISTS views (img TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, last_viewed INTEGER NOT NULL DEFAULT 0)');
+    $ins = $db->prepare('INSERT INTO views (img, count, last_viewed) VALUES (:img, 1, :ts) ON CONFLICT(img) DO UPDATE SET count = count + 1, last_viewed = :ts');
+    $ins->bindValue(':img', $img, SQLITE3_TEXT);
+    $ins->bindValue(':ts', time(), SQLITE3_INTEGER);
+    $ins->execute();
+    $sel = $db->prepare('SELECT count FROM views WHERE img = :img');
+    $sel->bindValue(':img', $img, SQLITE3_TEXT);
+    $res = $sel->execute();
+    $row = $res->fetchArray(SQLITE3_ASSOC);
+    $count = $row ? (int)$row['count'] : 1;
+    $db->close();
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Database error']);
+    exit;
+}
+
+echo json_encode(['count' => $count]);
+COUNTER;
+        $dbFilename = preg_replace('/[^a-zA-Z0-9_\-]/', '_', basename($this->outDir)) . '_views.db';
+        $content = str_replace('__DB_FILENAME__', $dbFilename, $content);
+        $this->writeFile($this->outDir . DIRECTORY_SEPARATOR . 'counter.php', $content);
+        $this->log('Written: counter.php (DB: ' . $dbFilename . ')');
+    }
+
     private function albumsRelPathToUrl(string $relPath): string
     {
         return implode('/', array_map('rawurlencode', explode('/', $relPath)));
@@ -757,6 +829,7 @@ a{color:inherit;text-decoration:none}
 .photo img{width:100%;height:160px;object-fit:cover;display:block}
 .loader{padding:22px 0;text-align:center;color:var(--muted)}
 .section-label{margin:20px 0 8px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.view-count{font-size:12px;color:var(--muted);white-space:nowrap;padding:0 4px}
 .breadcrumb{display:flex;align-items:center;gap:4px;flex-wrap:wrap;flex:1;min-width:0}.crumb{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crumb:hover{color:var(--text)}.crumb-sep{color:var(--muted);font-size:12px;opacity:.5;flex-shrink:0}.crumb-current{font-weight:700;color:var(--text)}
 .site-footer{padding:24px 16px;text-align:center;font-size:12px;color:var(--muted);border-top:1px solid var(--border)}.site-footer a{color:var(--muted);text-decoration:underline;text-underline-offset:3px}
 .viewerbar{}

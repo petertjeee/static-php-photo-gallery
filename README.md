@@ -1,6 +1,6 @@
 # Static Photo Gallery Generator
 
-**Version 1.1**
+**Version 1.2**
 
 This repo contains a simple PHP CLI tool that generates a static photo gallery from the `albums/` directory.
 
@@ -19,7 +19,7 @@ This repo contains a simple PHP CLI tool that generates a static photo gallery f
 
 ## Usage
 
-From the project directory:
+From the project directory:I
 
 ```bash
 php build.php --out=/path/to/your/webroot/gallery
@@ -50,7 +50,30 @@ So `albums/` should exist under the gallery webroot (as you indicated).
 
 - Only `.jpg`, `.jpeg`, and `.png` files are included.
 - Other file types (e.g. `Thumbs.db`) are ignored.
-- Subdirectories inside an album are ignored.
+- Subdirectories inside albums are fully supported at any depth.
+
+## View Counter
+
+Each run writes a `counter.php` into your gallery webroot. When a visitor opens an image in the viewer for more than 1.5 seconds, a background request increments a counter stored in a SQLite database placed one directory above your gallery webroot.
+
+The database filename is derived automatically from the gallery directory name — for example, if your webroot is `/etc/nginx/html/gallery`, the database will be `gallery_views.db`. This means multiple galleries on the same server each get their own separate database.
+
+The current view count is shown live in the viewer topbar.
+
+### Requirements for the counter
+- PHP must be enabled in nginx for the gallery directory (needed only for `counter.php`)
+- PHP `sqlite3` extension enabled
+- The web server process needs write permission to create `gallery_views.db`
+
+### Changing the database path
+
+Edit the `DB_PATH` constant at the top of the generated `counter.php`:
+
+```php
+define('DB_PATH', '/your/custom/path/gallery_views.db');
+```
+
+> **Note:** Do not place `gallery_views.db` inside the webroot. The default path (`../gallery_views.db`) stores it one level above, keeping it non-web-accessible.
 
 ## Security
 

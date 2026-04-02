@@ -6,3 +6,6 @@ albums/*
 
 # Default output folder (if you use it)
 site/
+
+# View counter database
+*.db
