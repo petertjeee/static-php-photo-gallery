@@ -708,6 +708,21 @@ define('DB_PATH', __DIR__ . '/../__DB_FILENAME__');
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['debug'])) {
+    $dir = dirname(DB_PATH);
+    echo json_encode([
+        'db_path'        => DB_PATH,
+        'db_dir'         => $dir,
+        'db_dir_exists'  => is_dir($dir),
+        'db_dir_writable'=> is_writable($dir),
+        'db_file_exists' => file_exists(DB_PATH),
+        'db_file_writable'=> file_exists(DB_PATH) ? is_writable(DB_PATH) : 'n/a (not created yet)',
+        'sqlite3_available' => class_exists('SQLite3'),
+        'php_user'       => function_exists('posix_getpwuid') ? (posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : 'unknown (posix ext missing)',
+    ], JSON_PRETTY_PRINT);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
@@ -733,20 +748,32 @@ if (!preg_match('#^[a-zA-Z0-9_./%+\- ]+$#u', $img)) {
 try {
     $db = new SQLite3(DB_PATH);
     $db->busyTimeout(2000);
-    $db->exec('CREATE TABLE IF NOT EXISTS views (img TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, last_viewed INTEGER NOT NULL DEFAULT 0)');
+    $ok = $db->exec('CREATE TABLE IF NOT EXISTS views (img TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, last_viewed INTEGER NOT NULL DEFAULT 0)');
+    if ($ok === false) {
+        error_log('counter.php: CREATE TABLE failed: ' . $db->lastErrorMsg());
+    }
     $ins = $db->prepare('INSERT INTO views (img, count, last_viewed) VALUES (:img, 1, :ts) ON CONFLICT(img) DO UPDATE SET count = count + 1, last_viewed = :ts');
+    if ($ins === false) {
+        error_log('counter.php: prepare(INSERT) failed: ' . $db->lastErrorMsg());
+        throw new RuntimeException('prepare failed');
+    }
     $ins->bindValue(':img', $img, SQLITE3_TEXT);
     $ins->bindValue(':ts', time(), SQLITE3_INTEGER);
     $ins->execute();
     $sel = $db->prepare('SELECT count FROM views WHERE img = :img');
+    if ($sel === false) {
+        error_log('counter.php: prepare(SELECT) failed: ' . $db->lastErrorMsg());
+        throw new RuntimeException('prepare failed');
+    }
     $sel->bindValue(':img', $img, SQLITE3_TEXT);
     $res = $sel->execute();
     $row = $res->fetchArray(SQLITE3_ASSOC);
     $count = $row ? (int)$row['count'] : 1;
     $db->close();
 } catch (Throwable $e) {
+    error_log('counter.php: ' . $e->getMessage() . ' | DB_PATH=' . DB_PATH . ' | dir_writable=' . (is_writable(dirname(DB_PATH)) ? 'yes' : 'no'));
     http_response_code(500);
-    echo json_encode(['error' => 'Database error']);
+    echo json_encode(['error' => 'Database error', 'detail' => $e->getMessage()]);
     exit;
 }
 
