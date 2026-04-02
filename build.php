@@ -560,7 +560,7 @@ final class GalleryBuilder
             . 'viewTimer=setTimeout(function(){'
             . 'fetch(data.root+"counter.php",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({img:it.src})})'
             . '.then(function(r){return r.json();})'
-            . '.then(function(d){var vc=document.getElementById("view-count");if(vc)vc.textContent=d.count+(d.count===1?" view":" views");})'
+            . '.then(function(d){var c=(d&&typeof d.count==="number")?d.count:0;var vc=document.getElementById("view-count");if(vc)vc.textContent=c+(c===1?" view":" views");})'
             . '.catch(function(){});'
             . '},1500);'
             . 'Array.from(film.children).forEach((el)=>{el.classList.toggle("active", parseInt(el.dataset.idx,10)===idx);});'
