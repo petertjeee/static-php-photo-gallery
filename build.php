@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 
 if (PHP_SAPI !== 'cli') {
     if (!headers_sent()) {
@@ -62,30 +62,14 @@ final class GalleryBuilder
         $this->log('Found albums: ' . count($albums));
 
         foreach ($albums as &$album) {
-            $this->log('Album: ' . $album['id']);
-            $album['images'] = $this->scanImages($album['path']);
-            $this->log('  Images: ' . count($album['images']));
-            $album['thumb_dir'] = $album['path'] . DIRECTORY_SEPARATOR . 'thumb';
-            $album['thumb_large_dir'] = $album['thumb_dir'] . DIRECTORY_SEPARATOR . 'lg';
-            $album['thumb_small_dir'] = $album['thumb_dir'] . DIRECTORY_SEPARATOR . 'sm';
-            $this->ensureDir($album['thumb_large_dir']);
-            $this->ensureDir($album['thumb_small_dir']);
-
-            foreach ($album['images'] as &$img) {
-                $img['thumb_large_rel'] = 'albums/' . rawurlencode($album['id']) . '/thumb/lg/' . rawurlencode($img['thumb_name']);
-                $img['thumb_small_rel'] = 'albums/' . rawurlencode($album['id']) . '/thumb/sm/' . rawurlencode($img['thumb_name']);
-                $this->ensureThumbnail($img['abs'], $album['thumb_large_dir'] . DIRECTORY_SEPARATOR . $img['thumb_name'], $this->thumbLargeSize);
-                $this->ensureThumbnail($img['abs'], $album['thumb_small_dir'] . DIRECTORY_SEPARATOR . $img['thumb_name'], $this->thumbSmallSize);
-                $img['exif'] = $this->extractExif($img['abs']);
-            }
-            unset($img);
+            $album['albumsRelPath'] = $album['id'];
+            $this->processAlbumNode($album);
         }
         unset($album);
 
         $this->writeIndex($albums);
         foreach ($albums as $album) {
-            $this->writeAlbumIndexPage($album);
-            $this->writeAlbumViewerPage($album);
+            $this->writeNodePages($album);
         }
 
         $this->log('Thumbnails created: ' . $this->thumbsCreated);
@@ -372,8 +356,8 @@ final class GalleryBuilder
     {
         $cards = '';
         foreach ($albums as $album) {
-            $count = count($album['images']);
-            $cover = $count > 0 ? $album['images'][0]['thumb_large_rel'] : '';
+            $count = $this->countImages($album);
+            $cover = $this->findCover($album);
 
             $coverHtml = $cover !== ''
                 ? '<img class="cover" loading="lazy" src="' . $this->escapeAttr($cover) . '" alt="" />'
@@ -398,18 +382,42 @@ final class GalleryBuilder
         $this->writeFile($this->outDir . DIRECTORY_SEPARATOR . 'index.html', $html);
     }
 
-    private function writeAlbumIndexPage(array $album): void
+    private function writeAlbumIndexPage(array $node, int $depth, string $prefix): void
     {
-        $albumOut = $this->outDir . DIRECTORY_SEPARATOR . $album['id'];
+        $parts = explode('/', $node['albumsRelPath']);
+        $albumOut = $this->outDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $parts);
         $this->ensureDir($albumOut);
 
+        $subdirSection = '';
+        if (!empty($node['subdirs'])) {
+            $subdirCards = '';
+            foreach ($node['subdirs'] as $sub) {
+                $count = $this->countImages($sub);
+                $cover = $this->findCover($sub);
+                $coverHtml = $cover !== ''
+                    ? '<img class="cover" loading="lazy" src="' . $this->escapeAttr($prefix . $cover) . '" alt="" />'
+                    : '<div class="cover cover-empty"></div>';
+                $subdirCards .= '<a class="card" href="' . $this->escapeAttr(rawurlencode($sub['id'])) . '/">'
+                    . $coverHtml
+                    . '<div class="meta">'
+                    . '<div class="title">' . $this->escapeHtml($sub['title']) . '</div>'
+                    . '<div class="count">' . $count . ' photos</div>'
+                    . '</div>'
+                    . '</a>';
+            }
+            $subdirSection = '<div class="grid albums">' . $subdirCards . '</div>';
+            if (!empty($node['images'])) {
+                $subdirSection .= '<div class="section-label">Photos</div>';
+            }
+        }
+
         $items = [];
-        foreach ($album['images'] as $idx => $img) {
+        foreach ($node['images'] as $idx => $img) {
             $items[] = [
                 'idx' => $idx,
-                'src' => '../albums/' . rawurlencode($album['id']) . '/' . rawurlencode($img['name']),
-                'thumb' => '../' . $img['thumb_large_rel'],
-                'thumbSm' => '../' . $img['thumb_small_rel'],
+                'src' => $prefix . 'albums/' . $this->albumsRelPathToUrl($node['albumsRelPath']) . '/' . rawurlencode($img['name']),
+                'thumb' => $prefix . $img['thumb_large_rel'],
+                'thumbSm' => $prefix . $img['thumb_small_rel'],
                 'name' => $img['name'],
                 'exif' => $img['exif'] ?? [],
             ];
@@ -417,8 +425,8 @@ final class GalleryBuilder
 
         $json = json_encode(
             [
-                'id' => $album['id'],
-                'title' => $album['title'],
+                'id' => $node['id'],
+                'title' => $node['title'],
                 'items' => $items,
                 'pageSize' => $this->pageSize,
             ],
@@ -426,58 +434,67 @@ final class GalleryBuilder
         );
 
         if ($json === false) {
-            $this->fail('Failed to encode album JSON for ' . $album['id']);
+            $this->fail('Failed to encode album JSON for ' . $node['albumsRelPath']);
         }
+
+        $backLabel = $depth === 1 ? '← Albums' : '← Back';
 
         $content = ''
             . '<div class="topbar">'
-            . '<a class="back" href="../">← Albums</a>'
-            . '<div class="brand">' . $this->escapeHtml($album['title']) . '</div>'
+            . '<a class="back" href="../">' . $backLabel . '</a>'
+            . '<div class="brand">' . $this->escapeHtml($node['title']) . '</div>'
             . '</div>'
             . '<div class="container">'
-            . '<div id="grid" class="grid photos"></div>'
-            . '<div id="loader" class="loader">Loading…</div>'
-            . '</div>'
-            . '<script>'
-            . 'window.__GALLERY__=' . $json . ';'
-            . '(function(){'
-            . 'const data=window.__GALLERY__;'
-            . 'const grid=document.getElementById("grid");'
-            . 'const loader=document.getElementById("loader");'
-            . 'let idx=0;'
-            . 'function renderNext(){'
-            . 'const end=Math.min(data.items.length, idx + (data.pageSize||60));'
-            . 'for(;idx<end;idx++){' 
-            . 'const it=data.items[idx];'
-            . 'const a=document.createElement("a");a.className="photo";a.href="view.html?i="+it.idx;'
-            . 'const img=document.createElement("img");img.loading="lazy";img.src=it.thumb;img.alt="";'
-            . 'a.appendChild(img);'
-            . 'grid.appendChild(a);'
-            . '}'
-            . 'if(idx>=data.items.length){loader.textContent="";obs.disconnect();}'
-            . '}'
-            . 'const obs=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting) renderNext();});},{rootMargin:"800px"});'
-            . 'obs.observe(loader);'
-            . 'renderNext();'
-            . '})();'
-            . '</script>';
+            . $subdirSection;
 
-        $html = $this->wrapPage($album['title'], $content);
+        if (!empty($node['images'])) {
+            $content .= '<div id="grid" class="grid photos"></div>'
+                . '<div id="loader" class="loader">Loading…</div>'
+                . '</div>'
+                . '<script>'
+                . 'window.__GALLERY__=' . $json . ';'
+                . '(function(){'
+                . 'const data=window.__GALLERY__;'
+                . 'const grid=document.getElementById("grid");'
+                . 'const loader=document.getElementById("loader");'
+                . 'let idx=0;'
+                . 'function renderNext(){'
+                . 'const end=Math.min(data.items.length, idx + (data.pageSize||60));'
+                . 'for(;idx<end;idx++){' 
+                . 'const it=data.items[idx];'
+                . 'const a=document.createElement("a");a.className="photo";a.href="view.html?i="+it.idx;'
+                . 'const img=document.createElement("img");img.loading="lazy";img.src=it.thumb;img.alt="";'
+                . 'a.appendChild(img);'
+                . 'grid.appendChild(a);'
+                . '}'
+                . 'if(idx>=data.items.length){loader.textContent="";obs.disconnect();}'
+                . '}'
+                . 'const obs=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting) renderNext();});},{rootMargin:"800px"});'
+                . 'obs.observe(loader);'
+                . 'renderNext();'
+                . '})();'
+                . '</script>';
+        } else {
+            $content .= '</div>';
+        }
+
+        $html = $this->wrapPage($node['title'], $content);
 
         $this->writeFile($albumOut . DIRECTORY_SEPARATOR . 'index.html', $html);
     }
 
-    private function writeAlbumViewerPage(array $album): void
+    private function writeAlbumViewerPage(array $node, int $depth, string $prefix): void
     {
-        $albumOut = $this->outDir . DIRECTORY_SEPARATOR . $album['id'];
+        $parts = explode('/', $node['albumsRelPath']);
+        $albumOut = $this->outDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $parts);
         $this->ensureDir($albumOut);
 
         $items = [];
-        foreach ($album['images'] as $idx => $img) {
+        foreach ($node['images'] as $idx => $img) {
             $items[] = [
                 'idx' => $idx,
-                'src' => '../albums/' . rawurlencode($album['id']) . '/' . rawurlencode($img['name']),
-                'thumbSm' => '../' . ($img['thumb_small_rel'] ?? ''),
+                'src' => $prefix . 'albums/' . $this->albumsRelPathToUrl($node['albumsRelPath']) . '/' . rawurlencode($img['name']),
+                'thumbSm' => $prefix . ($img['thumb_small_rel'] ?? ''),
                 'name' => $img['name'],
                 'exif' => $img['exif'] ?? [],
             ];
@@ -485,21 +502,21 @@ final class GalleryBuilder
 
         $json = json_encode(
             [
-                'id' => $album['id'],
-                'title' => $album['title'],
+                'id' => $node['id'],
+                'title' => $node['title'],
                 'items' => $items,
             ],
             JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
         );
 
         if ($json === false) {
-            $this->fail('Failed to encode viewer JSON for ' . $album['id']);
+            $this->fail('Failed to encode viewer JSON for ' . $node['albumsRelPath']);
         }
 
         $content = ''
             . '<div class="topbar viewerbar">'
             . '<a class="back" href="./">← Thumbnails</a>'
-            . '<div class="brand">' . $this->escapeHtml($album['title']) . '</div>'
+            . '<div class="brand">' . $this->escapeHtml($node['title']) . '</div>'
             . '<div class="viewer-actions">'
             . '<a id="dl" class="btn" href="#" download>Download</a>'
             . '<button id="exifBtn" class="btn" type="button">EXIF</button>'
@@ -565,8 +582,109 @@ final class GalleryBuilder
             . '})();'
             . '</script>';
 
-        $html = $this->wrapPage($album['title'], $content);
+        $html = $this->wrapPage($node['title'], $content);
         $this->writeFile($albumOut . DIRECTORY_SEPARATOR . 'view.html', $html);
+    }
+
+    private function processAlbumNode(array &$node): void
+    {
+        $this->log('Processing: ' . $node['albumsRelPath']);
+        $node['images'] = $this->scanImages($node['path']);
+        $this->log('  Images: ' . count($node['images']));
+
+        $node['thumb_dir'] = $node['path'] . DIRECTORY_SEPARATOR . 'thumb';
+        $node['thumb_large_dir'] = $node['thumb_dir'] . DIRECTORY_SEPARATOR . 'lg';
+        $node['thumb_small_dir'] = $node['thumb_dir'] . DIRECTORY_SEPARATOR . 'sm';
+        $this->ensureDir($node['thumb_large_dir']);
+        $this->ensureDir($node['thumb_small_dir']);
+
+        foreach ($node['images'] as &$img) {
+            $urlPath = $this->albumsRelPathToUrl($node['albumsRelPath']);
+            $img['thumb_large_rel'] = 'albums/' . $urlPath . '/thumb/lg/' . rawurlencode($img['thumb_name']);
+            $img['thumb_small_rel'] = 'albums/' . $urlPath . '/thumb/sm/' . rawurlencode($img['thumb_name']);
+            $this->ensureThumbnail($img['abs'], $node['thumb_large_dir'] . DIRECTORY_SEPARATOR . $img['thumb_name'], $this->thumbLargeSize);
+            $this->ensureThumbnail($img['abs'], $node['thumb_small_dir'] . DIRECTORY_SEPARATOR . $img['thumb_name'], $this->thumbSmallSize);
+            $img['exif'] = $this->extractExif($img['abs']);
+        }
+        unset($img);
+
+        $subdirs = $this->scanSubDirs($node['path']);
+        foreach ($subdirs as &$sub) {
+            $sub['albumsRelPath'] = $node['albumsRelPath'] . '/' . $sub['id'];
+            $this->processAlbumNode($sub);
+        }
+        unset($sub);
+        $node['subdirs'] = $subdirs;
+    }
+
+    private function scanSubDirs(string $dirPath): array
+    {
+        $items = scandir($dirPath);
+        if ($items === false) {
+            return [];
+        }
+
+        $subs = [];
+        foreach ($items as $name) {
+            if ($name === '.' || $name === '..' || $name === 'thumb') {
+                continue;
+            }
+
+            $path = $dirPath . DIRECTORY_SEPARATOR . $name;
+            if (!is_dir($path)) {
+                continue;
+            }
+
+            $subs[] = [
+                'id' => $name,
+                'title' => $this->humanize($name),
+                'path' => $path,
+            ];
+        }
+
+        usort($subs, static fn(array $a, array $b) => strcmp($a['id'], $b['id']));
+        return $subs;
+    }
+
+    private function writeNodePages(array $node): void
+    {
+        $depth = count(explode('/', $node['albumsRelPath']));
+        $prefix = str_repeat('../', $depth);
+        $this->writeAlbumIndexPage($node, $depth, $prefix);
+        if (!empty($node['images'])) {
+            $this->writeAlbumViewerPage($node, $depth, $prefix);
+        }
+        foreach ($node['subdirs'] as $sub) {
+            $this->writeNodePages($sub);
+        }
+    }
+
+    private function albumsRelPathToUrl(string $relPath): string
+    {
+        return implode('/', array_map('rawurlencode', explode('/', $relPath)));
+    }
+
+    private function countImages(array $node): int
+    {
+        $count = count($node['images']);
+        foreach ($node['subdirs'] as $sub) {
+            $count += $this->countImages($sub);
+        }
+        return $count;
+    }
+
+    private function findCover(array $node): string
+    {
+        if (!empty($node['images'])) {
+            return $node['images'][0]['thumb_large_rel'];
+        }
+        foreach ($node['subdirs'] as $sub) {
+            $cover = $this->findCover($sub);
+            if ($cover !== '') {
+                return $cover;
+            }
+        }
+        return '';
     }
 
     private function wrapPage(string $title, string $bodyHtml): string
@@ -610,6 +728,7 @@ a{color:inherit;text-decoration:none}
 .photo{display:block;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:rgba(255,255,255,.03)}
 .photo img{width:100%;height:160px;object-fit:cover;display:block}
 .loader{padding:22px 0;text-align:center;color:var(--muted)}
+.section-label{margin:20px 0 8px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
 .viewerbar{justify-content:space-between}
 .viewer-actions{display:flex;gap:10px;align-items:center}
 .btn{padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:transparent;color:inherit;cursor:pointer;font:inherit}

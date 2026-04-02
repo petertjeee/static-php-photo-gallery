@@ -1,11 +1,12 @@
 # Static Photo Gallery Generator
 
-**Version 1.0**
+**Version 1.1**
 
 This repo contains a simple PHP CLI tool that generates a static photo gallery from the `albums/` directory.
 
 - Album overview page: `index.html`
-- Per-album page: `<album>/index.html`
+- Per-album page: `<album>/index.html` — shows subdirectories before photos if both exist
+- Subdirectory support: any depth, each subdir gets its own `index.html` and `view.html`
 - Thumbnails: `albums/<album>/thumb/`
 
 ## Requirements
